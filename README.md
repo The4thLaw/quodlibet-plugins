@@ -1,2 +1,3 @@
 # quodlibet-plugins
-Custom QuodLibet plugins
+
+Custom [QuodLibet](https://github.com/quodlibet/quodlibet) plugins.
