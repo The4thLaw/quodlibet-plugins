@@ -41,12 +41,12 @@ class ExportSavedSearches(EventPlugin, PluginConfigMixin):
         vbox = Gtk.VBox(spacing=6)
         
         queries = {}
+        
         query_path = os.path.join(get_user_dir(), 'lists', 'queries.saved')
-        query_file = open(query_path, 'rU')
-        for query_string in query_file:
-            name = next(query_file).strip()
-            queries[name] = Query(query_string.strip())
-        query_file.close()
+        with open(query_path, 'rU', encoding='utf-8') as query_file:
+            for query_string in query_file:
+                name = next(query_file).strip()
+                queries[name] = Query(query_string.strip())
 
         for query_name, query in queries.items():
             check_button = ConfigCheckButton((query_name), "plugins", self._config_key(query_name))
@@ -77,6 +77,7 @@ class ExportSavedSearches(EventPlugin, PluginConfigMixin):
                         song('~people').replace("\n", ", "),
                         song('~title~version'))
                     path = song('~filename')
+                    print(path)
                     path = relpath(path, dir_path)
                     text += "#EXTINF:%d,%s\n" % (song('~#length'), title)
                     text += path + "\n"
