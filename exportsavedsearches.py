@@ -15,6 +15,7 @@
 
 # Inspired by https://gist.github.com/Tamriel/204ee6e3fe84e7450d2a71d6127f34eb
 
+import glob
 import os
 from os.path import relpath
 from gi.repository import Gtk
@@ -57,6 +58,23 @@ class ExportSavedSearches(EventPlugin, PluginConfigMixin):
         chooserButton.set_current_folder(self.lastfolder)
         chooserButton.set_action(Gtk.FileChooserAction.SELECT_FOLDER)
         
+        # https://stackoverflow.com/a/14742779/109813
+        def get_actual_filename(name):
+            # Do nothing except on Windows
+            if os.name != 'nt':
+                return name
+                
+            dirs = name.split('\\')
+            # disk letter
+            test_name = [dirs[0].upper()]
+            for d in dirs[1:]:
+                test_name += ["%s[%s]" % (d[:-1], d[-1])]
+            res = glob.glob('\\'.join(test_name))
+            if not res:
+                # File not found, return the input
+                return name
+            return res[0]
+        
         def __file_error(file_path):
             qltk.ErrorMessage(
                 None,
@@ -77,8 +95,12 @@ class ExportSavedSearches(EventPlugin, PluginConfigMixin):
                         song('~people').replace("\n", ", "),
                         song('~title~version'))
                     path = song('~filename')
-                    print(path)
-                    path = relpath(path, dir_path)
+                    path = get_actual_filename(path)
+                    try:
+                        path = relpath(path, dir_path)
+                    except ValueError:
+                        # Keep absolute path
+                        pass
                     text += "#EXTINF:%d,%s\n" % (song('~#length'), title)
                     text += path + "\n"
 
