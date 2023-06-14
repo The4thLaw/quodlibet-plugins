@@ -18,6 +18,7 @@
 import glob
 import os
 from os.path import relpath
+from pathlib import Path
 from gi.repository import Gtk
 from quodlibet import _, app, config, get_user_dir, qltk
 from quodlibet.library import SongLibrary
@@ -26,6 +27,7 @@ from quodlibet.plugins.events import EventPlugin
 from quodlibet.qltk import Icons
 from quodlibet.qltk.ccb import ConfigCheckButton
 from quodlibet.query import Query
+from quodlibet.util.dprint import print_, print_d
 from quodlibet.util.path import get_home_dir
 
 class ExportSavedSearches(EventPlugin, PluginConfigMixin):
@@ -39,7 +41,18 @@ class ExportSavedSearches(EventPlugin, PluginConfigMixin):
     
     @classmethod
     def PluginPreferences(self, parent):
-        vbox = Gtk.VBox(spacing=6)
+        mainBox = Gtk.VBox(spacing=6)
+
+        listbox = Gtk.ListBox()
+        listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+
+        listVbox = Gtk.VBox(spacing=6)
+        mainBox.pack_start(listVbox, True, True, 0)
+        swin = Gtk.ScrolledWindow()
+        swin.set_hexpand(True)
+        swin.set_vexpand(True)
+        swin.add(listbox)
+        listVbox.pack_start(swin, True, True, 0)
         
         queries = {}
         
@@ -52,28 +65,24 @@ class ExportSavedSearches(EventPlugin, PluginConfigMixin):
         for query_name, query in queries.items():
             check_button = ConfigCheckButton((query_name), "plugins", self._config_key(query_name))
             check_button.set_active(self.config_get_bool(query_name))
-            vbox.pack_start(check_button, False, True, 0)
+            row = Gtk.ListBoxRow()
+            row.add(check_button)
+            listbox.add(row)
         
         chooserButton = Gtk.FileChooserButton(_('Select destination folder'))
         chooserButton.set_current_folder(self.lastfolder)
         chooserButton.set_action(Gtk.FileChooserAction.SELECT_FOLDER)
-        
-        # https://stackoverflow.com/a/14742779/109813
+
+        # https://stackoverflow.com/a/54984701/109813
         def get_actual_filename(name):
             # Do nothing except on Windows
             if os.name != 'nt':
                 return name
-                
-            dirs = name.split('\\')
-            # disk letter
-            test_name = [dirs[0].upper()]
-            for d in dirs[1:]:
-                test_name += ["%s[%s]" % (d[:-1], d[-1])]
-            res = glob.glob('\\'.join(test_name))
-            if not res:
-                # File not found, return the input
-                return name
-            return res[0]
+            
+            actual = str(Path(name).resolve())
+            print_d('QuodLibet-known name is', name)
+            print_d('Actual file name is', actual)
+            return actual
         
         def __file_error(file_path):
             qltk.ErrorMessage(
@@ -82,6 +91,7 @@ class ExportSavedSearches(EventPlugin, PluginConfigMixin):
                 _("Writing to <b>%s</b> failed.") % util.escape(file_path)).run()
         
         def __m3u_export(dir_path, query_name, songs):
+            print_d('Processing playlist', query_name)
             file_path = os.path.join(dir_path, query_name + '.m3u')
             try:
                 fhandler = open(file_path, "wb")
@@ -121,11 +131,11 @@ class ExportSavedSearches(EventPlugin, PluginConfigMixin):
             message = qltk.Message(Gtk.MessageType.INFO, app.window, _("Done"), _("Export finished."))
             message.run()
 
-        start_button = Gtk.Button(label=("Export"))
-        start_button.connect('clicked', __start)
+        startButton = Gtk.Button(label=("Export"))
+        startButton.connect('clicked', __start)
 
-        vbox.pack_start(chooserButton, True, True, 0)
-        vbox.pack_start(start_button, True, True, 0)
+        mainBox.pack_start(chooserButton, False, False, 0)
+        mainBox.pack_start(startButton, False, False, 0)
         label = Gtk.Label(label="Quod Libet may become unresponsive. You will get a message when finished.")
-        vbox.pack_start(label, True, True, 0)
-        return qltk.Frame(("Select the saved searches to copy:"), child=vbox)
+        mainBox.pack_start(label, False, False, 0)
+        return qltk.Frame(("Select the saved searches to copy:"), child=mainBox)
