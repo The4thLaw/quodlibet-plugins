@@ -15,19 +15,18 @@
 
 # Inspired by https://gist.github.com/Tamriel/204ee6e3fe84e7450d2a71d6127f34eb
 
-import glob
+import threading
 import os
 from os.path import relpath
 from pathlib import Path
-from gi.repository import Gtk
-from quodlibet import _, app, config, get_user_dir, qltk
-from quodlibet.library import SongLibrary
+from gi.repository import GLib, Gtk
+from quodlibet import _, app, get_user_dir, qltk
 from quodlibet.plugins import PluginConfigMixin
 from quodlibet.plugins.events import EventPlugin
 from quodlibet.qltk import Icons
 from quodlibet.qltk.ccb import ConfigCheckButton
 from quodlibet.query import Query
-from quodlibet.util.dprint import print_, print_d
+from quodlibet.util.dprint import print_d
 from quodlibet.util.path import get_home_dir
 
 class ExportSavedSearches(EventPlugin, PluginConfigMixin):
@@ -38,6 +37,92 @@ class ExportSavedSearches(EventPlugin, PluginConfigMixin):
     REQUIRES_ACTION = True
     
     lastfolder = get_home_dir()
+
+    def showSuccess():
+        successMessage = qltk.Message(Gtk.MessageType.INFO, app.window, _("Done"), _("Export finished."))
+        successMessage.run()
+
+    # https://stackoverflow.com/a/54984701/109813
+    def get_actual_filename(name):
+        # Do nothing except on Windows
+        if os.name != 'nt':
+            return name
+        
+        actual = str(Path(name).resolve())
+        print_d('QuodLibet-known name is', name)
+        print_d('Actual file name is', actual)
+        return actual
+    
+    def __file_error(file_path):
+        qltk.ErrorMessage(
+            None,
+            _("Unable to export playlist"),
+            _("Writing to <b>%s</b> failed.") % util.escape(file_path)).run()
+        
+    def export_all(self, target_folder, queries):
+        songs = app.library.get_content()
+
+        self.mainProgressBar.set_fraction(0)
+
+        totalQueries = 0
+        for query_name, query in queries.items():
+            if self.config_get_bool(query_name):
+                # Query is enabled
+                totalQueries += 1
+
+        currentQuery = 0
+        self.mainProgressBar.set_show_text(True)
+        self.mainProgressBar.set_text(str(currentQuery) + ' / ' + str(totalQueries))
+        for query_name, query in queries.items():
+            if self.config_get_bool(query_name):
+                # Query is enabled
+                songs_for_query = query.filter(songs)
+                self.m3u_export(self, target_folder, query_name, songs_for_query)
+                currentQuery += 1
+                self.mainProgressBar.set_fraction(currentQuery / totalQueries)
+                self.mainProgressBar.set_text(str(currentQuery) + ' / ' + str(totalQueries))
+
+        self.progressDialog.destroy()
+
+        # Show dialog on GUI thread
+        GLib.timeout_add(0, self.showSuccess)        
+        
+    def m3u_export(self, dir_path, query_name, songs):
+        print_d('Processing playlist', query_name)
+        self.progressLabel.set_text('Processing playlist ' + query_name)
+        file_path = os.path.join(dir_path, query_name + '.m3u')
+        try:
+            fhandler = open(file_path, "wb")
+        except IOError:
+            self.__file_error(file_path)
+        else:
+            text = "#EXTM3U\n"
+
+            curSong = 0
+            totalSongs = len(songs)
+            self.subProgressBar.set_fraction(0)
+            self.subProgressBar.set_show_text(True)
+            self.subProgressBar.set_text(str(curSong) + ' / ' + str(totalSongs))
+            for song in songs:
+                title = "%s - %s" % (
+                    song('~people').replace("\n", ", "),
+                    song('~title~version'))
+                path = song('~filename')
+                path = self.get_actual_filename(path)
+                try:
+                    path = relpath(path, dir_path)
+                except ValueError:
+                    # Keep absolute path
+                    pass
+                text += "#EXTINF:%d,%s\n" % (song('~#length'), title)
+                text += path + "\n"
+                curSong += 1
+                self.subProgressBar.set_fraction(curSong / totalSongs)
+                self.subProgressBar.set_text(str(curSong) + ' / ' + str(totalSongs))
+
+            fhandler.write(text.encode("utf-8"))
+            fhandler.close()
+            self.subProgressBar.set_fraction(0)
     
     @classmethod
     def PluginPreferences(self, parent):
@@ -73,63 +158,26 @@ class ExportSavedSearches(EventPlugin, PluginConfigMixin):
         chooserButton.set_current_folder(self.lastfolder)
         chooserButton.set_action(Gtk.FileChooserAction.SELECT_FOLDER)
 
-        # https://stackoverflow.com/a/54984701/109813
-        def get_actual_filename(name):
-            # Do nothing except on Windows
-            if os.name != 'nt':
-                return name
-            
-            actual = str(Path(name).resolve())
-            print_d('QuodLibet-known name is', name)
-            print_d('Actual file name is', actual)
-            return actual
-        
-        def __file_error(file_path):
-            qltk.ErrorMessage(
-                None,
-                _("Unable to export playlist"),
-                _("Writing to <b>%s</b> failed.") % util.escape(file_path)).run()
-        
-        def __m3u_export(dir_path, query_name, songs):
-            print_d('Processing playlist', query_name)
-            file_path = os.path.join(dir_path, query_name + '.m3u')
-            try:
-                fhandler = open(file_path, "wb")
-            except IOError:
-                __file_error(file_path)
-            else:
-                text = "#EXTM3U\n"
+        self.progressDialog = Gtk.Dialog(title=_('Progress'),
+                         parent=app.window,
+                         flags=(Gtk.DialogFlags.MODAL |
+                                Gtk.DialogFlags.DESTROY_WITH_PARENT))
+        self.progressDialog.vbox.set_spacing(5)
+        self.progressLabel = Gtk.Label()
+        self.progressDialog.vbox.add(self.progressLabel)
+        self.mainProgressBar = Gtk.ProgressBar()
+        self.progressDialog.vbox.add(self.mainProgressBar)
+        self.subProgressBar = Gtk.ProgressBar()
+        self.progressDialog.vbox.add(self.subProgressBar)
 
-                for song in songs:
-                    title = "%s - %s" % (
-                        song('~people').replace("\n", ", "),
-                        song('~title~version'))
-                    path = song('~filename')
-                    path = get_actual_filename(path)
-                    try:
-                        path = relpath(path, dir_path)
-                    except ValueError:
-                        # Keep absolute path
-                        pass
-                    text += "#EXTINF:%d,%s\n" % (song('~#length'), title)
-                    text += path + "\n"
-
-                fhandler.write(text.encode("utf-8"))
-                fhandler.close()
-        
-
-        def __start(button):
+        def __start(_):
             target_folder = chooserButton.get_filename()
+            self.progressDialog.show_all()
 
-            songs = app.library.get_content();
-            for query_name, query in queries.items():
-                if self.config_get_bool(query_name):
-                    # Query is enabled
-                    songs_for_query = query.filter(songs)
-                    __m3u_export(target_folder, query_name, songs_for_query)
-                    
-            message = qltk.Message(Gtk.MessageType.INFO, app.window, _("Done"), _("Export finished."))
-            message.run()
+             # Work in a thread to avoid locking up the UI
+            thread = threading.Thread(target=self.export_all,
+                                            args=(self, target_folder, queries))
+            thread.start()
 
         startButton = Gtk.Button(label=("Export"))
         startButton.connect('clicked', __start)

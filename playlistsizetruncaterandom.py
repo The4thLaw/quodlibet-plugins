@@ -23,17 +23,51 @@ from gi.repository import Gtk
 from quodlibet import _, app
 from quodlibet.plugins.playlist import PlaylistPlugin
 from quodlibet.qltk import Icons
-from quodlibet.qltk.msg import Message
+from quodlibet.util.dprint import print_d
+
+import threading
+import time
 
 class PlaylistSize(PlaylistPlugin):
     PLUGIN_ID = 'playlistsizetruncaterandom'
-    PLUGIN_NAME = _('Truncate playlists to size')
+    PLUGIN_NAME = _('Truncate playlist to size')
     PLUGIN_DESC = _('Truncates a playlist to a given size in MB by removing songs at random')
     PLUGIN_ICON = Icons.EDIT_CLEAR
     REQUIRES_ACTION = True
 
     def plugin_handles(self, playlists):
         return len(playlists) == 1
+
+    def truncatePlaylist(self, playlist, currentSize, desiredSize):
+        print_d('Going to truncate the playlist')
+        # Work on a copy that we can edit without all the callbacks and saves on playlist.songs, which take a very long time
+        copiedSongList = [] + playlist.songs
+
+        self.progressLabel.set_text('Songs remaining: ' + str(len(copiedSongList)) + ' (' + str(self.toMB(currentSize)) + ' MB)')
+        songsToRemove = []
+
+        initialSizeDifference = desiredSize - currentSize
+        self.progressBar.set_fraction(0)
+        
+        while desiredSize < currentSize:
+            song = random.choice(copiedSongList)
+            songsToRemove.append(song)
+            copiedSongList.remove(song)
+            currentSize -= song['~#filesize']
+            print_d('Removing song: ' + str(song))
+            self.progressLabel.set_text('Songs remaining: ' + str(len(copiedSongList)) + ' (' + str(self.toMB(currentSize)) + ' MB)')
+            currentSizeDifference = desiredSize - currentSize
+            self.progressBar.set_fraction((initialSizeDifference - currentSizeDifference) / initialSizeDifference)
+
+        print_d('Removing ' + str(len(songsToRemove)) + ' songs from the playlist')
+        self.progressBar.pulse()
+        time.sleep(10)
+        playlist.remove_songs(songsToRemove, True)
+        print_d('Removed all requested songs from the playlist')
+        self.progressDialog.destroy()
+
+    def toMB(self, size):
+        return int(size/1024/1024)
 
     def plugin_playlist(self, playlist):
         size = 0
@@ -54,7 +88,7 @@ class PlaylistSize(PlaylistPlugin):
         sizeSelectDlg.vbox.add(label)
         maxSize = Gtk.SpinButton()
         maxSize.set_numeric(True)
-        maxSize.set_adjustment(Gtk.Adjustment(int(size/1024/1024), 1, sys.maxsize, 1, 1))
+        maxSize.set_adjustment(Gtk.Adjustment(self.toMB(size), 1, sys.maxsize, 1, 1))
         sizeSelectDlg.vbox.add(maxSize)
         
         sizeSelectDlg.show_all()
@@ -65,15 +99,23 @@ class PlaylistSize(PlaylistPlugin):
             
             currentSize = size;
             desiredSize = int(maxSize.get_value() * 1024 * 1024)
-            
-            while desiredSize < currentSize:
-                #dialog3 = Message(Gtk.MessageType.INFO, app.window, playlist.name, _('Current: ') + str(currentSize) + ' ' + _('Desired: ') + str(desiredSize))
-                #dialog3.run()
-                song = random.choice(playlist.songs)
-                #dialog4 = Message(Gtk.MessageType.INFO, app.window, playlist.name, _('Song: ') + song['title'])
-                #dialog4.run()
-                playlist.remove_songs([song], True)
-                currentSize -= song['~#filesize']
+
+            self.progressDialog = Gtk.Dialog(title=_('Progress'),
+                         parent=app.window,
+                         flags=(Gtk.DialogFlags.MODAL |
+                                Gtk.DialogFlags.DESTROY_WITH_PARENT))
+            self.progressDialog.vbox.set_spacing(5)
+            self.progressLabel = Gtk.Label()
+            self.progressDialog.vbox.add(self.progressLabel)
+            self.progressBar = Gtk.ProgressBar()
+            self.progressDialog.vbox.add(self.progressBar)
+            self.progressDialog.show_all()
+
+            # Work in a thread to avoid locking up the UI
+            thread = threading.Thread(target=self.truncatePlaylist,
+                                            args=(playlist, currentSize, desiredSize))
+            thread.start()
+
             return True
         else:
             sizeSelectDlg.destroy()
