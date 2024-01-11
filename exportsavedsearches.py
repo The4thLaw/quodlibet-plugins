@@ -17,6 +17,7 @@
 
 import glob
 import os
+import re
 from os.path import relpath
 from pathlib import Path
 from gi.repository import Gtk
@@ -57,7 +58,7 @@ class ExportSavedSearches(EventPlugin, PluginConfigMixin):
         queries = {}
         
         query_path = os.path.join(get_user_dir(), 'lists', 'queries.saved')
-        with open(query_path, 'rU', encoding='utf-8') as query_file:
+        with open(query_path, 'r', encoding='utf-8', newline=None) as query_file:
             for query_string in query_file:
                 name = next(query_file).strip()
                 queries[name] = Query(query_string.strip())
@@ -73,14 +74,56 @@ class ExportSavedSearches(EventPlugin, PluginConfigMixin):
         chooserButton.set_current_folder(self.lastfolder)
         chooserButton.set_action(Gtk.FileChooserAction.SELECT_FOLDER)
 
+        # https://stackoverflow.com/a/39140604/109813
+        def casedpath_unc(path):
+            unc, p = os.path.splitdrive(path)
+            r = glob.glob(unc + re.sub(r'([^:/\\])(?=[/\\]|$)|\[', r'[\g<0>]', p))
+            return r and r[0] or path
+
+        def get_actual_filename2(path):
+            orig_path = path
+            path = os.path.normpath(path)
+
+            # Build root to start searching from.  Different for unc paths.
+            if path.startswith(r'\\'):
+                path = path.lstrip(r'\\')
+                path_split = path.split('\\')
+                # listdir doesn't work on just the machine name
+                if len(path_split) < 3:
+                    return orig_path
+                test_path = r'\\{}\{}'.format(path_split[0], path_split[1])
+                start = 2
+            else:
+                path_split = path.split('\\')
+                test_path = path_split[0] + '\\'
+                start = 1
+
+            for i in range(start, len(path_split)):
+                part = path_split[i]
+                if os.path.isdir(test_path):
+                    for name in os.listdir(test_path):
+                        if name.lower() == part.lower():
+                            part = name
+                            break
+                    test_path = os.path.join(test_path, part)
+                else:
+                    return orig_path
+            return test_path
+
         # https://stackoverflow.com/a/54984701/109813
         def get_actual_filename(name):
             # Do nothing except on Windows
             if os.name != 'nt':
                 return name
             
-            actual = str(Path(name).resolve())
             print_d('QuodLibet-known name is', name)
+            # Old solution, does not cope with case sensitivity
+            # actual = str(Path(name).resolve())
+            # Super slow, copes with case sensitivity
+            # actual = casedpath_unc(name)
+            # Also slow, though a bit faster, copes with case sensitivity
+            actual = get_actual_filename2(name)
+            # One day try this: https://stackoverflow.com/a/3694799
             print_d('Actual file name is', actual)
             return actual
         
