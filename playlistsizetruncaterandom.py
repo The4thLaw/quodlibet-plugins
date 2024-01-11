@@ -24,10 +24,11 @@ from quodlibet import _, app
 from quodlibet.plugins.playlist import PlaylistPlugin
 from quodlibet.qltk import Icons
 from quodlibet.qltk.msg import Message
+from quodlibet.util.dprint import print_, print_d
 
 class PlaylistSize(PlaylistPlugin):
     PLUGIN_ID = 'playlistsizetruncaterandom'
-    PLUGIN_NAME = _('Truncate playlists to size')
+    PLUGIN_NAME = _('Truncate playlist to size')
     PLUGIN_DESC = _('Truncates a playlist to a given size in MB by removing songs at random')
     PLUGIN_ICON = Icons.EDIT_CLEAR
     REQUIRES_ACTION = True
@@ -66,12 +67,11 @@ class PlaylistSize(PlaylistPlugin):
             currentSize = size;
             desiredSize = int(maxSize.get_value() * 1024 * 1024)
             
+            # TODO: it would be better to call remove_songs once at the end as it has time-consuming operations
             while desiredSize < currentSize:
-                #dialog3 = Message(Gtk.MessageType.INFO, app.window, playlist.name, _('Current: ') + str(currentSize) + ' ' + _('Desired: ') + str(desiredSize))
-                #dialog3.run()
                 song = random.choice(playlist.songs)
-                #dialog4 = Message(Gtk.MessageType.INFO, app.window, playlist.name, _('Song: ') + song['title'])
-                #dialog4.run()
+                print_('Current: ' + str(currentSize) + ' ' + 'Desired: ' + str(desiredSize) + ', removing ' + song['title'])
+                # True to remove dupes as well
                 playlist.remove_songs([song], True)
                 currentSize -= song['~#filesize']
             return True
