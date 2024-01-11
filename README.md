@@ -4,7 +4,7 @@ Custom [Quod Libet](https://github.com/quodlibet/quodlibet) plugins.
 
 ## Compatibility
 
-The plugins have been tested using Quod Libet 4.6.
+The plugins have been tested using Quod Libet 4.1, 4.4, 4.5, 4.6.
 
 ## Plugins
 
@@ -19,3 +19,7 @@ Beware that due to the lack of an efficient way of getting the case-sensitive na
 This plugin truncates a playlist to a size in MB by removing random songs.
 
 **Warning:** The original playlist is modified by this process. Make a copy if it's important.
+
+### playlistsize
+
+Obsolete, Quod Libet now features this out of the box.
